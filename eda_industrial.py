@@ -9,6 +9,11 @@ from sklearn.preprocessing import StandardScaler
 
 # Configuração de estilo visual
 sns.set_theme(style="whitegrid")
+# Paleta de cores personalizada
+PRIMARY_COLOR = '#3d1152'
+SECONDARY_COLOR = '#8c5eff' # Um roxo mais claro para contraste
+sns.set_palette([PRIMARY_COLOR, SECONDARY_COLOR])
+plt.rcParams['axes.titleweight'] = 'bold' # Títulos em negrito
 
 def carregar_e_limpar_dados(filepath):
     print("--- Carregando e Limpando Dados ---")
@@ -67,8 +72,9 @@ def analise_1_correlacao_vs_mutual_info(df, target_col):
 
     # Plotar
     plt.figure(figsize=(10, 6))
-    comparison.plot(kind='bar', figsize=(12, 6))
-    plt.title("Análise 1: Pearson Correlation vs Mutual Information (Top 10 Features)")
+    # Usando cores manuais para distinguir as duas métricas
+    ax = comparison.plot(kind='bar', figsize=(12, 6), color=[SECONDARY_COLOR, PRIMARY_COLOR])
+    plt.title("Análise 1: Pearson Correlation vs Mutual Information (Top 10 Features)", fontweight='bold')
     plt.ylabel("Score")
     plt.tight_layout()
     plt.savefig('analise_1_correlacao_vs_mi.png')
@@ -112,8 +118,8 @@ def analise_2_visual_scatter(df, target_col, top_features):
 
     for i, feature in enumerate(features_to_plot):
         plt.subplot(rows, cols, i+1)
-        sns.scatterplot(data=df, x=feature, y=target_col, alpha=0.5)
-        plt.title(f"{feature} vs {target_col}")
+        sns.scatterplot(data=df, x=feature, y=target_col, alpha=0.5, color=PRIMARY_COLOR)
+        plt.title(f"{feature} vs {target_col}", fontweight='bold')
         plt.xlabel(feature)
         plt.ylabel(target_col)
 
@@ -147,16 +153,16 @@ def analise_3_residuos_linear(df, target_col):
     plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
-    sns.scatterplot(x=y, y=y_pred, alpha=0.5)
-    plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-    plt.title("Real vs Predito (Linear Regression)")
+    sns.scatterplot(x=y, y=y_pred, alpha=0.5, color=PRIMARY_COLOR)
+    plt.plot([y.min(), y.max()], [y.min(), y.max()], color=SECONDARY_COLOR, linestyle='--')
+    plt.title("Real vs Predito (Linear Regression)", fontweight='bold')
     plt.xlabel("Real")
     plt.ylabel("Predito")
 
     plt.subplot(1, 2, 2)
-    sns.scatterplot(x=y_pred, y=residuals, alpha=0.5)
-    plt.axhline(0, color='r', linestyle='--')
-    plt.title("Resíduos vs Predito")
+    sns.scatterplot(x=y_pred, y=residuals, alpha=0.5, color=PRIMARY_COLOR)
+    plt.axhline(0, color=SECONDARY_COLOR, linestyle='--')
+    plt.title("Resíduos vs Predito", fontweight='bold')
     plt.xlabel("Predito")
     plt.ylabel("Resíduos (Erro)")
 
