@@ -81,19 +81,46 @@ def analise_2_visual_scatter(df, target_col, top_features):
     print("Objetivo: Buscar formas não-lineares nos dados (curvas, 'S', clusters).")
     print("Interpretação: Se os pontos não formam uma reta clara, Regressão Linear falhará.")
 
-    top_3 = top_features[:3]
+    # Lista de features especificadas pelo usuário
+    requested_features = [
+        "FT-1004.PV",
+        "FT-1003.PV",
+        "TT-1006.PV",
+        "TT-1100.PV",
+        "PT-1100.PV",
+        "FRC-1004.PV"
+    ]
 
-    plt.figure(figsize=(18, 5))
-    for i, feature in enumerate(top_3):
-        plt.subplot(1, 3, i+1)
+    # Filtrar apenas as que existem no DataFrame
+    valid_requested_features = [f for f in requested_features if f in df.columns]
+
+    if valid_requested_features:
+        print(f"Gerando scatter plots para features solicitadas: {valid_requested_features}")
+        features_to_plot = valid_requested_features
+        filename_suffix = "_requested"
+    else:
+        print("Nenhuma das features solicitadas foi encontrada. Usando Top 3 do MI.")
+        features_to_plot = top_features[:3]
+        filename_suffix = "_top3_mi"
+
+    # Configurar grid de plotagem
+    n_features = len(features_to_plot)
+    cols = 3
+    rows = (n_features // cols) + (1 if n_features % cols > 0 else 0)
+
+    plt.figure(figsize=(6 * cols, 5 * rows))
+
+    for i, feature in enumerate(features_to_plot):
+        plt.subplot(rows, cols, i+1)
         sns.scatterplot(data=df, x=feature, y=target_col, alpha=0.5)
         plt.title(f"{feature} vs {target_col}")
         plt.xlabel(feature)
         plt.ylabel(target_col)
 
     plt.tight_layout()
-    plt.savefig('analise_2_scatter_plots.png')
-    print(f"Gráfico salvo em 'analise_2_scatter_plots.png' para as features: {', '.join(top_3)}")
+    output_filename = f'analise_2_scatter_plots{filename_suffix}.png'
+    plt.savefig(output_filename)
+    print(f"Gráfico salvo em '{output_filename}'")
 
 def analise_3_residuos_linear(df, target_col):
     print("\n\n=== Análise 3: Análise de Resíduos de Regressão Linear ===")
