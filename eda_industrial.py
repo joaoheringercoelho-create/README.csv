@@ -50,44 +50,7 @@ def analise_1_correlacao_vs_mutual_info(df, target_col):
     X = df.drop(columns=[target_col])
     y = df[target_col]
 
-    # Calcular Correlação de Pearson (absoluta)
-    correlations = X.corrwith(y).abs()
-
-    # Calcular Mutual Information
-    # MI captura qualquer tipo de dependência, não só linear
-    mi_scores = mutual_info_regression(X, y, random_state=42)
-    mi_series = pd.Series(mi_scores, index=X.columns)
-
-    # Juntar em um DataFrame para comparar
-    comparison = pd.DataFrame({
-        'Pearson Correlation (Abs)': correlations,
-        'Mutual Information': mi_series
-    })
-
-    # Ordenar por MI
-    comparison = comparison.sort_values('Mutual Information', ascending=False).head(10)
-
-    print("\nTop 10 Features por Mutual Information:")
-    print(comparison)
-
-    # Plotar
-    plt.figure(figsize=(10, 6))
-    # Usando cores manuais para distinguir as duas métricas
-    ax = comparison.plot(kind='bar', figsize=(12, 6), color=[SECONDARY_COLOR, PRIMARY_COLOR])
-    plt.title("Análise 1: Pearson Correlation vs Mutual Information (Top 10 Features)", fontweight='bold')
-    plt.ylabel("Score")
-    plt.tight_layout()
-    plt.savefig('analise_1_correlacao_vs_mi.png')
-    print("Gráfico salvo em 'analise_1_correlacao_vs_mi.png'")
-
-    return comparison.index.tolist() # Retorna top features
-
-def analise_2_visual_scatter(df, target_col, top_features):
-    print("\n\n=== Análise 2: Inspeção Visual (Scatter Plots) ===")
-    print("Objetivo: Buscar formas não-lineares nos dados (curvas, 'S', clusters).")
-    print("Interpretação: Se os pontos não formam uma reta clara, Regressão Linear falhará.")
-
-    # Lista de features especificadas pelo usuário
+    # Lista de features especificadas pelo usuário para análise
     requested_features = [
         "FT-1004.PV",
         "FT-1003.PV",
@@ -97,17 +60,62 @@ def analise_2_visual_scatter(df, target_col, top_features):
         "FRC-1004.PV"
     ]
 
-    # Filtrar apenas as que existem no DataFrame
-    valid_requested_features = [f for f in requested_features if f in df.columns]
+    # Filtrar apenas as que existem no X
+    valid_requested = [f for f in requested_features if f in X.columns]
 
-    if valid_requested_features:
-        print(f"Gerando scatter plots para features solicitadas: {valid_requested_features}")
-        features_to_plot = valid_requested_features
-        filename_suffix = "_requested"
+    # Calcular métricas para TODAS as features (para retornar as top para o scatter)
+    mi_scores_all = mutual_info_regression(X, y, random_state=42)
+    mi_series_all = pd.Series(mi_scores_all, index=X.columns)
+
+    # Mas para o gráfico, vamos focar nas PEDIDAS pelo usuário (ou Top 10 se não houver pedidos validos)
+    if valid_requested:
+        print(f"Focando análise de correlação nas variáveis solicitadas: {valid_requested}")
+        features_to_analyze = valid_requested
     else:
-        print("Nenhuma das features solicitadas foi encontrada. Usando Top 3 do MI.")
-        features_to_plot = top_features[:3]
-        filename_suffix = "_top3_mi"
+        print("Nenhuma variável solicitada encontrada. Usando Top 10 MI.")
+        features_to_analyze = mi_series_all.sort_values(ascending=False).head(10).index.tolist()
+
+    X_subset = X[features_to_analyze]
+
+    # Calcular Correlação de Pearson (absoluta)
+    correlations = X_subset.corrwith(y).abs()
+
+    # Pegar MI scores já calculados
+    mi_series = mi_series_all[features_to_analyze]
+
+    # Juntar em um DataFrame para comparar
+    comparison = pd.DataFrame({
+        'Pearson Correlation (Abs)': correlations,
+        'Mutual Information': mi_series
+    })
+
+    # Ordenar por MI para visualização
+    comparison = comparison.sort_values('Mutual Information', ascending=False)
+
+    print("\nScore das Features Selecionadas:")
+    print(comparison)
+
+    # Plotar
+    plt.figure(figsize=(10, 6))
+    # Usando cores manuais para distinguir as duas métricas
+    ax = comparison.plot(kind='bar', figsize=(12, 6), color=[SECONDARY_COLOR, PRIMARY_COLOR])
+    plt.title("Análise 1: Pearson Correlation vs Mutual Information (Variáveis Selecionadas)", fontweight='bold')
+    plt.ylabel("Score")
+    plt.tight_layout()
+    plt.savefig('analise_1_correlacao_vs_mi.png')
+    print("Gráfico salvo em 'analise_1_correlacao_vs_mi.png'")
+
+    # Retorna as Top Features GERAIS (não só as pedidas) para usar no Scatter Plot
+    return mi_series_all.sort_values(ascending=False).index.tolist()
+
+def analise_2_visual_scatter(df, target_col, top_features):
+    print("\n\n=== Análise 2: Inspeção Visual (Scatter Plots) ===")
+    print("Objetivo: Buscar formas não-lineares nos dados (curvas, 'S', clusters).")
+    print("Interpretação: Se os pontos não formam uma reta clara, Regressão Linear falhará.")
+
+    # Agora o Scatter Plot mostra o TOP 6 Geral (Automático), já que as pedidas foram para a Análise 1
+    features_to_plot = top_features[:6]
+    print(f"Gerando scatter plots para as Top 6 features com maior Mutual Information: {features_to_plot}")
 
     # Configurar grid de plotagem
     n_features = len(features_to_plot)
@@ -124,7 +132,7 @@ def analise_2_visual_scatter(df, target_col, top_features):
         plt.ylabel(target_col)
 
     plt.tight_layout()
-    output_filename = f'analise_2_scatter_plots{filename_suffix}.png'
+    output_filename = 'analise_2_scatter_plots.png'
     plt.savefig(output_filename)
     print(f"Gráfico salvo em '{output_filename}'")
 
