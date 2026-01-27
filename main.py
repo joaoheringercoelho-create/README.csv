@@ -301,7 +301,16 @@ def avaliar_e_visualizar(resultados, target_col, output_dir='output/plots'):
     print("\nTop 5 Features Importantes:")
     print(coef_df[['Feature', 'Coeficiente']].head(5))
 
+    print("\n--- Interpretação das Features (Análise de Redundância) ---")
+    print("Nota: O modelo ElasticNet tende a selecionar apenas uma variável de um grupo de variáveis altamente correlacionadas.")
+    print("Por exemplo, se FC-1002 (Controlador) e FT-1002 (Transmissor) trazem a mesma informação de vazão,")
+    print("o modelo pode atribuir peso a apenas uma delas (ex: FC) e zerar a outra (FT) para evitar redundância.")
+    print("Isso explica por que vemos vazões (FC/FT) dominando o topo, mas não necessariamente seus pares duplicados.")
+
 if __name__ == "__main__":
+    # Garantir que o diretório de saída existe
+    os.makedirs('output/plots', exist_ok=True)
+
     caminho_dataset = 'dataset.csv'
     df = carregar_e_limpar_dados(caminho_dataset)
 
