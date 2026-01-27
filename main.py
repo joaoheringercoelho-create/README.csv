@@ -279,7 +279,7 @@ def avaliar_e_visualizar(resultados, target_col, output_dir='output/plots'):
     plt.close()
     print(f"Gráfico salvo: {output_dir}/residuals.png")
 
-    # 4. Importância das Features
+    # 4. Importância das Features e Análise de Esparsidade
     features_names = X_train.columns
     # Criar DataFrame de coeficientes
     coef_df = pd.DataFrame({
@@ -287,19 +287,53 @@ def avaliar_e_visualizar(resultados, target_col, output_dir='output/plots'):
         'Coeficiente': coefs,
         'Abs_Coef': np.abs(coefs)
     })
-    # Ordenar por magnitude
-    coef_df = coef_df.sort_values(by='Abs_Coef', ascending=False)
 
-    plt.figure(figsize=(10, 8))
-    sns.barplot(x='Coeficiente', y='Feature', data=coef_df.head(20), hue='Feature', palette='viridis', legend=False)
-    plt.title('Top 20 Features mais Importantes (Coeficientes ElasticNet)', fontweight='bold')
-    plt.xlabel('Valor do Coeficiente')
-    plt.savefig(f'{output_dir}/feature_importance.png')
+    # Separar Features Relevantes vs Quase Nulas
+    limiar_corte = 1e-4
+    df_ativas = coef_df[coef_df['Abs_Coef'] >= limiar_corte].sort_values(by='Abs_Coef', ascending=False)
+    df_inativas = coef_df[coef_df['Abs_Coef'] < limiar_corte].sort_values(by='Abs_Coef', ascending=False)
+
+    # Gráfico A: Features Relevantes (sem os zeros)
+    plt.figure(figsize=(10, 6))
+    if not df_ativas.empty:
+        sns.barplot(x='Coeficiente', y='Feature', data=df_ativas, hue='Feature', palette='viridis', legend=False)
+        plt.title('Features Relevantes (Coeficiente > 1e-4)', fontweight='bold')
+        plt.xlabel('Valor do Coeficiente')
+    else:
+        plt.text(0.5, 0.5, 'Nenhuma feature acima do limiar', ha='center')
+    plt.savefig(f'{output_dir}/features_relevantes.png')
     plt.close()
-    print(f"Gráfico salvo: {output_dir}/feature_importance.png")
+    print(f"Gráfico salvo: {output_dir}/features_relevantes.png")
 
-    print("\nTop 5 Features Importantes:")
-    print(coef_df[['Feature', 'Coeficiente']].head(5))
+    # Gráfico B: Features Quase Nulas (Retiradas)
+    plt.figure(figsize=(10, 8))
+    if not df_inativas.empty:
+        sns.barplot(x='Coeficiente', y='Feature', data=df_inativas, hue='Feature', palette='Reds_r', legend=False)
+        plt.title('Features Quase Nulas / Zeradas (Coeficiente < 1e-4)', fontweight='bold')
+        plt.xlabel('Valor do Coeficiente (Escala muito pequena)')
+    else:
+        plt.text(0.5, 0.5, 'Nenhuma feature zerada', ha='center')
+    plt.savefig(f'{output_dir}/features_inativas.png')
+    plt.close()
+    print(f"Gráfico salvo: {output_dir}/features_inativas.png")
+
+    # Gráfico C: Relação de Superioridade (Pizza)
+    count_ativas = len(df_ativas)
+    count_inativas = len(df_inativas)
+
+    plt.figure(figsize=(8, 8))
+    plt.pie([count_ativas, count_inativas],
+            labels=[f'Relevantes ({count_ativas})', f'Zeradas/Irrelevantes ({count_inativas})'],
+            autopct='%1.1f%%',
+            colors=['#3d1152', 'lightgray'],
+            textprops={'fontsize': 14, 'fontweight': 'bold'})
+    plt.title('Proporção de Esparsidade: Predomínio das Features Zeradas', fontweight='bold')
+    plt.savefig(f'{output_dir}/sparsity_pie_chart.png')
+    plt.close()
+    print(f"Gráfico salvo: {output_dir}/sparsity_pie_chart.png")
+
+    print("\nTop Features Relevantes:")
+    print(df_ativas[['Feature', 'Coeficiente']])
 
     print("\n--- Interpretação das Features (Análise de Redundância) ---")
     print("Nota: O modelo ElasticNet tende a selecionar apenas uma variável de um grupo de variáveis altamente correlacionadas.")
