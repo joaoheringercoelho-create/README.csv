@@ -1,11 +1,9 @@
 import pandas as pd
 import numpy as np
-import onnx
-from onnx import helper
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import ElasticNet
+from sklearn.linear_model import ElasticNet, LinearRegression
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
-from sklearn.metrics import mean_absolute_error, r2_score
+from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
 from skl2onnx import to_onnx
 from skl2onnx.common.data_types import FloatTensorType
@@ -16,13 +14,22 @@ warnings.filterwarnings("ignore")
 DATASET_PATH = 'dataset.csv'
 MODEL_FILENAME = 'Testparameters.onnx'
 
-# Configuração de Variáveis
-TARGET_TT = 'TT-1100.PV'  # Variável independente
-TARGET_AT = 'AT-1100.PV'  # Variável dependente (usa X + TT)
-COLS = [TARGET_AT, TARGET_TT, 'FT-1004.PV', 'FT-1005.PV', 'PT-1100.PV', 'PT-1004.PV', 'TT-1004.PV', 'TT-1005.PV', 'TT-1006.PV']
+# --- Definição de Variáveis ---
+TARGET_AT = 'AT-1100.PV'  # Output 1
+TARGET_TT = 'TT-1100.PV'  # Output 2 (Soft Sensor) E Input (para AT)
 
-def load_data(path, cols):
-    """Carrega e limpa o dataset."""
+# Inputs Base (Sensores Normais)
+INPUTS_BASE = [
+    'FT-1004.PV', 'FT-1005.PV',
+    'PT-1100.PV', 'PT-1004.PV',
+    'TT-1004.PV', 'TT-1005.PV', 'TT-1006.PV'
+]
+
+# Input Full para o modelo (Base + Sensor TT)
+# Importante: TT deve ser o último para facilitar a manipulação da matriz de pesos
+INPUTS_FULL = INPUTS_BASE + [TARGET_TT]
+
+def load_data(path):
     print(f"\n[IO] Carregando: {path}...")
     df = pd.read_csv(path, sep=';', decimal=',')
     df.columns = [c.split(' Value')[0].strip() for c in df.columns]
@@ -32,85 +39,118 @@ def load_data(path, cols):
         df.set_index('Timestamp', inplace=True)
         df.sort_index(inplace=True)
 
-    return df[ [c for c in cols if c in df.columns] ].astype('float32')
+    return df
 
-def train_model(X, y, name):
-    """Treina ElasticNet com GridSearchCV."""
+def train_elasticnet(X, y, name):
     print(f"[Treino] {name}...")
-    pipe = Pipeline([('scaler', StandardScaler()), ('elastic', ElasticNet(max_iter=5000))])
-    grid = GridSearchCV(pipe, {'elastic__alpha': [0.1, 1.0], 'elastic__l1_ratio': [0.5, 0.9]},
+    # GridSearch sem Pipeline interno (dados já escalados) para obter coeficientes diretos
+    model = ElasticNet(max_iter=5000)
+    grid = GridSearchCV(model, {'alpha': [0.1, 1.0], 'l1_ratio': [0.5, 0.9]},
                         cv=TimeSeriesSplit(n_splits=3), scoring='neg_mean_squared_error', n_jobs=-1)
     grid.fit(X, y)
     print(f"  -> Params: {grid.best_params_}")
     return grid.best_estimator_
 
-def merge_onnx(m1, m2):
-    """Mescla dois modelos ONNX: M1(X->TT) e M2(X+TT->AT) em um único grafo."""
-    m1 = onnx.compose.add_prefix(m1, "tt_")
-    m2 = onnx.compose.add_prefix(m2, "at_")
-
-    # Cria nó de concatenação: [Input_Global, Output_M1] -> Input_M2
-    concat = helper.make_node('Concat', inputs=[m1.graph.input[0].name, m1.graph.output[0].name],
-                              outputs=[m2.graph.input[0].name], axis=1, name='link_tt_to_at')
-
-    # Monta grafo final
-    graph = helper.make_graph(
-        list(m1.graph.node) + [concat] + list(m2.graph.node),
-        "chained_model",
-        list(m1.graph.input),
-        list(m1.graph.output) + list(m2.graph.output), # Outputs: TT, AT
-        list(m1.graph.initializer) + list(m2.graph.initializer)
-    )
-    return helper.make_model(graph, producer_name="reactor_chain", opset_imports=list(m1.opset_import))
-
 # --- Execução Principal ---
 
-# 1. Preparação dos Dados
-df = load_data(DATASET_PATH, COLS)
-X = df.drop([TARGET_TT, TARGET_AT], axis=1)
-y_tt = df[[TARGET_TT]]
-y_at = df[[TARGET_AT]]
+# 1. Carga e Preparação
+df = load_data(DATASET_PATH)
 
-# Split Temporal (80/20)
-split = int(len(X) * 0.8)
-X_train, X_test = X.iloc[:split], X.iloc[split:]
-y_tt_train, y_tt_test = y_tt.iloc[:split], y_tt.iloc[split:]
-y_at_train, y_at_test = y_at.iloc[:split], y_at.iloc[split:]
+# Separar X e y
+# X_full inclui o sensor TT-1100.PV
+X_full = df[INPUTS_FULL].astype('float32')
+y_at = df[TARGET_AT].astype('float32')
+y_tt = df[TARGET_TT].astype('float32')
 
-# 2. Treinamento em Cadeia
-# Modelo 1: Preve Temperatura baseado nos sensores
-model_tt = train_model(X_train, y_tt_train, "Temperatura (TT)")
+# Split 80/20
+split = int(len(X_full) * 0.8)
+X_train_full = X_full.iloc[:split]
+X_test_full = X_full.iloc[split:]
+y_at_train = y_at.iloc[:split]
+y_at_test = y_at.iloc[split:]
+y_tt_train = y_tt.iloc[:split]
+y_tt_test = y_tt.iloc[split:]
 
-# Modelo 2: Preve Densidade baseado nos sensores + Temperatura Real (Teacher Forcing)
-X_aug_train = pd.concat([X_train, y_tt_train], axis=1)
-model_at = train_model(X_aug_train, y_at_train, "Densidade (AT)")
+# 2. Scaling (Global)
+# Treinamos o scaler no dataset completo (Full Inputs)
+scaler = StandardScaler()
+X_train_full_scaled = scaler.fit_transform(X_train_full)
+X_test_full_scaled = scaler.transform(X_test_full)
 
-# 3. Exportação e Fusão ONNX
-onnx_tt = to_onnx(model_tt, initial_types=[('in', FloatTensorType([None, X.shape[1]]))], target_opset=12)
-onnx_at = to_onnx(model_at, initial_types=[('in_aug', FloatTensorType([None, X.shape[1]+1]))], target_opset=12)
-final_onnx = merge_onnx(onnx_tt, onnx_at)
+# Recuperar índices das colunas para treino parcial
+# INPUTS_BASE são as primeiras N colunas
+n_base = len(INPUTS_BASE)
+X_train_base_scaled = X_train_full_scaled[:, :n_base]
+
+# 3. Treinamento dos Modelos Individuais
+
+# Modelo A: TT (Soft Sensor)
+# Usa apenas INPUTS_BASE (sem ler o próprio sensor TT)
+model_tt = train_elasticnet(X_train_base_scaled, y_tt_train, "Temperatura (TT) [Base Inputs]")
+
+# Modelo B: AT (Densidade)
+# Usa INPUTS_FULL (Inputs + Sensor TT)
+model_at = train_elasticnet(X_train_full_scaled, y_at_train, "Densidade (AT) [Full Inputs]")
+
+# 4. Construção do Modelo Unificado (Proxy)
+# Criamos um LinearRegression dummy para conter os pesos combinados
+# Output esperado: [AT, TT]
+# Matriz de Coeficientes shape: (2, n_inputs_full)
+
+# Coeficientes AT (Linha 0): Copia direta do model_at
+coef_at = model_at.coef_
+
+# Coeficientes TT (Linha 1): Copia do model_tt + 0.0 na posição do input TT
+coef_tt = np.append(model_tt.coef_, 0.0)
+
+final_coefs = np.vstack([coef_at, coef_tt])
+final_intercepts = np.array([model_at.intercept_, model_tt.intercept_])
+
+# Criar estimator "falso" para exportação
+proxy_model = LinearRegression()
+proxy_model.coef_ = final_coefs
+proxy_model.intercept_ = final_intercepts
+proxy_model.n_features_in_ = len(INPUTS_FULL)
+
+# Criar Pipeline Final: Scaler -> ProxyModel
+final_pipeline = Pipeline([
+    ('scaler', scaler),
+    ('model', proxy_model)
+])
+
+# 5. Exportação ONNX Padrão
+# Isso gera um gráfico simples: Scaler -> LinearRegressor -> Output
+# Compatibilidade máxima com AVEVA/DCS
+initial_type = [('input', FloatTensorType([None, len(INPUTS_FULL)]))]
+onnx_model = to_onnx(final_pipeline, initial_types=initial_type, target_opset=12)
 
 with open(MODEL_FILENAME, "wb") as f:
-    f.write(final_onnx.SerializeToString())
-print(f"\n[OK] Modelo ONNX salvo: {MODEL_FILENAME}")
+    f.write(onnx_model.SerializeToString())
+print(f"\n[OK] Modelo ONNX Padrão exportado: {MODEL_FILENAME}")
 
-# 4. Documentação para Simulador
+# 6. Documentação
 print("\n" + "="*60)
-print(f"MAPA DE INPUTS (Total: {X.shape[1]} inputs)")
+print(f"MAPA DE INPUTS (Total: {len(INPUTS_FULL)})")
 print("="*60)
-for i, col in enumerate(X_train.columns):
-    print(f"Index {i} -> {col:12s} | Range Treino: [{X_train[col].min():.2f}, {X_train[col].max():.2f}]")
+for i, col in enumerate(INPUTS_FULL):
+    extra_info = " [SENSOR TT]" if col == TARGET_TT else ""
+    print(f"Index {i} -> {col:12s}{extra_info} | Range: [{X_train_full[col].min():.2f}, {X_train_full[col].max():.2f}]")
 
 print("\n" + "="*60)
-print("MAPA DE OUTPUTS (ONNX)")
+print("MAPA DE OUTPUTS")
 print("="*60)
-print("Index 0 -> TT-1100.PV (Temperatura) [Independente]")
-print("Index 1 -> AT-1100.PV (Densidade)   [Depende de TT]")
+print("Index 0 -> AT-1100.PV (Densidade)   [Lê X + Sensor TT]")
+print("Index 1 -> TT-1100.PV (Soft Sensor) [Lê apenas X, ignora Sensor TT]")
 
-# 5. Validação Rápida
-print("\n[Validação] R² Score no Test Set:")
-p_tt = model_tt.predict(X_test)
-p_at = model_at.predict(pd.concat([X_test, pd.DataFrame(p_tt, index=X_test.index, columns=[TARGET_TT])], axis=1))
+# 7. Validação
+print("\n[Validação] R² Score (Test Set):")
+# Predição usando o pipeline unificado
+y_pred_full = final_pipeline.predict(X_test_full)
 
-print(f"  - Temperatura: {r2_score(y_tt_test, p_tt):.4f}")
-print(f"  - Densidade:   {r2_score(y_at_test, p_at):.4f}")
+# y_pred_full[:, 0] é AT
+# y_pred_full[:, 1] é TT
+r2_at = r2_score(y_at_test, y_pred_full[:, 0])
+r2_tt = r2_score(y_tt_test, y_pred_full[:, 1])
+
+print(f"  - Densidade (AT):   {r2_at:.4f}")
+print(f"  - Temperatura (TT): {r2_tt:.4f}")
