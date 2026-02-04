@@ -116,8 +116,17 @@ print(f"\n[OK] Modelo ONNX exportado: {MODEL_FILENAME}")
 print("\n" + "="*50)
 print("MAPA DE MAPEAMENTO PARA AVEVA CORP")
 print("="*50)
+
+print("--- INPUTS (ENTRADAS) ---")
 for i, tag in enumerate(feature_list):
     print(f"Entrada {i} (Index {i}) -> Tag DCS: {tag}")
+
+print("\n--- OUTPUTS (SAÍDAS DO MODELO ONNX) ---")
+# O modelo ONNX retorna um array [None, 2] onde:
+# Index 0 = Primeiro target (AT-1100.PV)
+# Index 1 = Segundo target (TT-1100.PV)
+for i, tag in enumerate(TARGET_COL):
+    print(f"Saída {i} (Index {i}) -> Tag DCS: {tag}")
 print("="*50)
 
 # ---------------------------------------------------------
